@@ -1,7 +1,7 @@
 # BeatTooth
 Repository for BeatTooth embedded system
 
-##Features
+## Features
 1. Play Music
 2. Register on Beat Movements
 3. custom PCB
