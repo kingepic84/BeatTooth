@@ -10,6 +10,8 @@
     - Connect the grounds of both boards.
 */
 
+#include <Arduino.h>
+
 const int controlPin = 2;  // Pin used to send the trigger signal
 
 void setup() {

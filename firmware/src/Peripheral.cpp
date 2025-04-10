@@ -10,6 +10,8 @@
     - Make sure the grounds of both boards are connected.
 */
 
+#include <Arduino.h>
+
 const int triggerPin = 2;  // Pin used to receive the trigger signal
 const int ledPin     = 13; // Onboard LED pin to indicate code execution
 
