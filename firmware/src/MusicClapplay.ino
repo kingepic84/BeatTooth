@@ -1,156 +1,254 @@
-/*!
- *@file clap_music_rgb.ino
- *@brief Clap Detection, Music Playback, and RGB LED Beat Game
- *@details The DF1201S MP3 module starts playing music immediately. The user is expected to clap
- *         in time with the beat (roughly every 750 ms). The system continuously samples the ADXL3xx 
- *         accelerometer. When a sudden change (a clap) is detected, its time is recorded (subject to a
- *         1-second debounce). Then, at every 750‑ms beat, the code checks if the last clap occurred 
- *         in the final 50 ms of the beat (i.e. between 700 ms and 750 ms after the beat started). 
- *         If a clap is detected in that narrow window, the LED flashes green; if not, it flashes red.
- *@date 2023-10-09
- */
-
 #include <DFRobot_DF1201S.h>
-#include "SoftwareSerial.h"
-SoftwareSerial DF1201SSerial(2, 3);  // RX, TX
+#include "DFSerial.h"
+#include "mbed.h"
+#include <Arduino_BMI270_BMM150.h>   // built‑in BMI270 accelerometer
 
+// DF1201S music module setup:
+DFSerial* DF1201SSerial;
 DFRobot_DF1201S DF1201S;
 
-//---------------------------------------------------------
-// Accelerometer (ADXL3xx) Pin Definitions:
-// - analog 0: self test (unused)
-// - analog 1 (A1): z-axis
-// - analog 2 (A2): y-axis
-// - analog 3 (A3): x-axis
-// - analog 4: ground  --> provided via digital pin 18
-// - analog 5: vcc     --> provided via digital pin 19
-//---------------------------------------------------------
-const int groundpin = 18;
-const int powerpin  = 19;
-const int xpin      = A3;
-const int ypin      = A2;
-const int zpin      = A1;
+// RGB LED Pins
+const int redPin   = 8, greenPin = 9, bluePin  = 10;
 
-//---------------------------------------------------------
-// RGB LED Pins (LED is common cathode; longest lead is ground)
-//---------------------------------------------------------
-const int redPin   = 8;   // red channel (anode via resistor)
-const int greenPin = 9;   // green channel (anode via resistor)
-const int bluePin  = 10;  // blue channel (unused here)
+// Button pins
+const int btnRestart   = D5, btnPlayPause = D6, btnSkip = D7;
 
-//---------------------------------------------------------
-// Clap Detection Parameters
-//---------------------------------------------------------
-const int CLAP_THRESHOLD = 100; // (Do not change) Adjust the threshold as needed
+// Two demo songs
+const int songCount = 2;
+int BPMs[songCount] = { 79, 120 };
+const int patternLengths[songCount] = { 4, 4 };
+bool clapPatterns[songCount][4] = {
+  { true,  true,  true,  true  },
+  { true,  false, true,  false }
+};
+int currentSong = 0;
 
-// Variables to store previous accelerometer readings:
-int prevX = 0, prevY = 0, prevZ = 0;
-bool firstReading = true;
+// Beat & pattern
+int BPM, patternLength;
+unsigned long beatInterval, CLAP_LISTEN_DURATION, beatStartTime;
+int patternIndex;
+bool clapDetectedInBeat;
 
-// Timing variables:
-// lastClapTime is updated when a clap is detected (subject to debounce).
-unsigned long lastClapTime = 0;
-const unsigned long CLAP_DEBOUNCE = 10; // 1 second debounce
+// Clap state‑machine (g’s & ms)
+const float RISE_THRESHOLD_G     = 0.7;    // detect incoming strike
+const float FALL_THRESHOLD_G     = 0.7;    // detect the “zero” at impact
+const float OUT_THRESHOLD_G      = 0.4;    // detect rebound
 
-// Beat timing:
-unsigned long previousBeatMillis = 0;
-const unsigned long BEAT_INTERVAL = 750;   // 750 ms beat period
-const unsigned long VALID_CLAP_WINDOW = 125;  // Clap is valid if it occurs in the last 50 ms of the beat
+const unsigned long MAX_RISE_DURATION = 40;   // ms to see the initial spike
+const unsigned long MAX_OUT_DURATION  = 120;  // ms to see the rebound
 
-// LED on duration:
-const unsigned long LED_ON_DURATION = 200;   // LED lights for 200 ms
+const unsigned long CLAP_MARGIN_MS = 370;  // margin at end of beat
 
-void setup(void) {
+enum ClapState { WAIT_RISE, WAIT_FALL, WAIT_OUT };
+ClapState clapState;
+unsigned long phaseStart;
+
+// previous acceleration
+float prevAx, prevAy, prevAz;
+
+// LED timing
+const unsigned long LED_ON_DURATION = 150;
+int currentLED = -1;
+unsigned long ledOffTime;
+
+// Playback
+bool isPlaying;
+unsigned long pauseTimestamp;
+
+// Helpers
+void triggerLED(int color) {
+  currentLED = color;
+  ledOffTime = millis() + LED_ON_DURATION;
+  if (color == 0) {         // red
+    digitalWrite(redPin,   HIGH);
+    digitalWrite(greenPin, LOW);
+    digitalWrite(bluePin,  LOW);
+  }
+  else if (color == 1) {    // green
+    digitalWrite(redPin,   LOW);
+    digitalWrite(greenPin, HIGH);
+    digitalWrite(bluePin,  LOW);
+  }
+  else if (color == 2) {    // blue
+    digitalWrite(redPin,   LOW);
+    digitalWrite(greenPin, LOW);
+    digitalWrite(bluePin,  HIGH);
+  }
+}
+
+void updateLED() {
+  if (currentLED != -1 && millis() >= ledOffTime) {
+    digitalWrite(redPin, LOW);
+    digitalWrite(greenPin, LOW);
+    digitalWrite(bluePin, LOW);
+    currentLED = -1;
+  }
+}
+
+void resetBeatTimer() {
+  beatStartTime = millis();
+  patternIndex = 0;
+  clapDetectedInBeat = false;
+  clapState = WAIT_RISE;
+}
+
+void loadSongParams() {
+  BPM = BPMs[currentSong];
+  patternLength = patternLengths[currentSong];
+  beatInterval = 60000UL / BPM;
+  CLAP_LISTEN_DURATION = (unsigned long)(beatInterval * 0.4);
+  resetBeatTimer();
+}
+
+void setup() {
   Serial.begin(115200);
-  
-  // Setup accelerometer power pins:
-  pinMode(groundpin, OUTPUT);
-  pinMode(powerpin, OUTPUT);
-  digitalWrite(groundpin, LOW);
-  digitalWrite(powerpin, HIGH);
-  
-  // Setup RGB LED pins:
+
+  // DF1201S init
+  DF1201SSerial = new DFSerial(
+    digitalPinToPinName(D1),
+    digitalPinToPinName(D0),
+    115200
+  );
+  DF1201SSerial->logging = false;
+  Serial.println(DF1201S.begin(*DF1201SSerial));
+  DF1201S.setVol(5);
+  DF1201S.switchFunction(DF1201S.MUSIC);
+  delay(2000);
+  DF1201S.setPlayMode(DF1201S.ALLCYCLE);
+
+  // Buttons
+  pinMode(btnRestart,   INPUT_PULLUP);
+  pinMode(btnPlayPause, INPUT_PULLUP);
+  pinMode(btnSkip,      INPUT_PULLUP);
+
+  // LEDs
   pinMode(redPin, OUTPUT);
   pinMode(greenPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
   digitalWrite(redPin, LOW);
   digitalWrite(greenPin, LOW);
   digitalWrite(bluePin, LOW);
-  
-  // Initialize the DF1201S music module:
-  DF1201SSerial.begin(115200);
-  while (!DF1201S.begin(DF1201SSerial)) {
-    Serial.println("DF1201S init failed, please check the wire connection!");
-    delay(1000);
+
+  // IMU init
+  if (!IMU.begin()) {
+    Serial.println("BMI270 init failed!");
+    while (1);
   }
-  
-  DF1201S.setVol(1);
-  Serial.print("Volume: ");
-  Serial.println(DF1201S.getVol());
-  
-  DF1201S.switchFunction(DF1201S.MUSIC);
-  delay(2000);  // Allow prompt tone to finish
-  
-  DF1201S.setPlayMode(DF1201S.ALLCYCLE);
-  Serial.print("PlayMode: ");
-  Serial.println(DF1201S.getPlayMode());
-  
-  // Start playing music immediately:
+  IMU.readAcceleration(prevAx, prevAy, prevAz);
+
+  // Start first song
+  loadSongParams();
   DF1201S.start();
-  
-  Serial.println("Setup complete. Music playing; await claps to the beat...");
-  
-  previousBeatMillis = millis();
+  isPlaying = true;
+  Serial.println("Demo song 0 started");
+  delay(1000);
 }
 
-void loop(void) {
-  unsigned long currentMillis = millis();
-  
-  // --- Accelerometer Sampling & Clap Detection ---
-  // Sample the accelerometer continuously and record a clap if a sudden change occurs.
-  int currX = analogRead(xpin);
-  int currY = analogRead(ypin);
-  int currZ = analogRead(zpin);
-  
-  if (!firstReading && (currentMillis - lastClapTime >= CLAP_DEBOUNCE)) {
-    int deltaX = abs(currX - prevX);
-    int deltaY = abs(currY - prevY);
-    int deltaZ = abs(currZ - prevZ);
-    
-    if (deltaX > CLAP_THRESHOLD || deltaY > CLAP_THRESHOLD || deltaZ > CLAP_THRESHOLD) {
-      Serial.println("yes");  // Clap detected
-      lastClapTime = currentMillis;
-    }
-  } else {
-    firstReading = false;
+void loop() {
+  unsigned long now = millis();
+
+  // Button handling
+  if (digitalRead(btnRestart) == LOW) {
+    DF1201S.pause();
+    DF1201S.setPlayTime(0);
+    DF1201S.start();
+    isPlaying = true;
+    loadSongParams();
+    Serial.println("Song restarted");
+    delay(200);
   }
-  
-  // Update previous accelerometer readings:
-  prevX = currX;
-  prevY = currY;
-  prevZ = currZ;
-  
-  // --- Beat-Based LED Blink ---
-  // Every BEAT_INTERVAL (750 ms), the code checks whether the last clap occurred in the final
-  // VALID_CLAP_WINDOW (last 50 ms) of the beat window. If so, flash green; else, flash red.
-  if (currentMillis - previousBeatMillis >= BEAT_INTERVAL) {
-    // Save the start of the current beat window.
-    unsigned long beatStart = previousBeatMillis;
-    previousBeatMillis = currentMillis;  // update for the next beat
-    
-    // Check if the last clap occurred in the final 50 ms of the beat.
-    if (lastClapTime >= (beatStart + BEAT_INTERVAL - VALID_CLAP_WINDOW) && lastClapTime <= (beatStart + BEAT_INTERVAL)) {
-      // Valid clap detected in the final 50 ms; flash green.
-      digitalWrite(greenPin, HIGH);
-      delay(LED_ON_DURATION);
-      digitalWrite(greenPin, LOW);
+  if (digitalRead(btnPlayPause) == LOW) {
+    if (isPlaying) {
+      DF1201S.pause();
+      isPlaying = false;
+      pauseTimestamp = now;
+      Serial.println("Paused");
     } else {
-      // No valid clap during the last 50 ms; flash red.
-      digitalWrite(redPin, HIGH);
-      delay(LED_ON_DURATION);
-      digitalWrite(redPin, LOW);
+      DF1201S.start();
+      isPlaying = true;
+      unsigned long pausedFor = now - pauseTimestamp;
+      beatStartTime += pausedFor;
+      Serial.println("Resumed");
     }
+    delay(200);
   }
-  
-  delay(30); // Short delay for frequent sampling.
+  if (digitalRead(btnSkip) == LOW) {
+    DF1201S.next();
+    currentSong = (currentSong + 1) % songCount;
+    loadSongParams();
+    isPlaying = true;
+    Serial.print("Switched to song ");
+    Serial.println(currentSong);
+    delay(200);
+  }
+
+  if (!isPlaying) return;
+
+  // Clap detection via BMI270 & vector magnitude
+  float ax, ay, az;
+  IMU.readAcceleration(ax, ay, az);
+  float dx = ax - prevAx, dy = ay - prevAy, dz = az - prevAz;
+  float mag = sqrt(dx*dx + dy*dy + dz*dz);
+
+  switch (clapState) {
+    case WAIT_RISE:
+      if (mag > RISE_THRESHOLD_G) {
+        clapState = WAIT_FALL;
+        phaseStart = now;
+      }
+      break;
+
+    case WAIT_FALL:
+      if (mag < FALL_THRESHOLD_G) {
+        clapState = WAIT_OUT;
+        phaseStart = now;
+      } else if (now - phaseStart > MAX_RISE_DURATION) {
+        clapState = WAIT_RISE;
+      }
+      break;
+
+    case WAIT_OUT:
+      if (mag > OUT_THRESHOLD_G) {
+        unsigned long sinceBeat = now - beatStartTime;
+        if (sinceBeat >= (beatInterval - CLAP_MARGIN_MS) && sinceBeat <= beatInterval) {
+          // on‑beat: green later at beat
+          clapDetectedInBeat = true;
+          Serial.println("✅ TRUE CLAP on beat!");
+        } else {
+          // off‑beat within beat window: blue now
+          Serial.println("🔵 Clap off‑beat");
+          triggerLED(2);
+        }
+        clapState = WAIT_RISE;
+      } else if (now - phaseStart > MAX_OUT_DURATION) {
+        clapState = WAIT_RISE;
+      }
+      break;
+  }
+
+  prevAx = ax; prevAy = ay; prevAz = az;
+
+  // Beat evaluation
+  if (now - beatStartTime >= beatInterval) {
+    bool expected = clapPatterns[currentSong][patternIndex];
+    if (expected) {
+      if (clapDetectedInBeat) {
+        triggerLED(1);
+        Serial.println("Good beat");
+      } else {
+        triggerLED(0);
+        Serial.println("Missed beat");
+      }
+    } else if (clapDetectedInBeat) {
+      triggerLED(0);
+      Serial.println("Off‑beat clap");
+    } else {
+      Serial.println("Rest beat");
+    }
+    patternIndex = (patternIndex + 1) % patternLength;
+    beatStartTime += beatInterval;
+    clapDetectedInBeat = false;
+  }
+
+  updateLED();
 }
