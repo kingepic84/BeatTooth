@@ -11,12 +11,12 @@ DFRobot_DF1201S DF1201S;
 const int redPin   = 8, greenPin = 9, bluePin  = 10;
 
 // Button pins
-const int btnRestart   = D5, btnPlayPause = D6, btnSkip = D7;
+const int btnRestart   = 2, btnPlayPause = 3, btnSkip = 4;
 
 // Two demo songs
 const int songCount = 2;
 int BPMs[songCount] = { 79, 120 };
-const int patternLengths[songCount] = { 4, 4 };
+const int patternLengths[songCount] = { 4 , 4};
 bool clapPatterns[songCount][4] = {
   { true,  true,  true,  true  },
   { true,  false, true,  false }
