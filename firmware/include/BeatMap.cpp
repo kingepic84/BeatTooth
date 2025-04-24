@@ -105,8 +105,3 @@ array<int, 4> BeatMap::nextLine(int currentTimeSec)
         return {0, 0, 0, 0};
     return beatmap[currentIndex++];
 }
-
-int main()
-{
-    BeatMap bm = BeatMap();
-}
