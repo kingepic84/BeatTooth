@@ -25,7 +25,9 @@ BeatMap::BeatMap() : songName(""), bpm(0), timeSig{0, 0}, currentIndex(0) {}
 BeatMap BeatMap::loadFromCSV(const String &songFileName)
 {
     BeatMap bm;
-    String path = "/" + songFileName + ".csv";
+    String songFName = songFileName.substring(0, songFileName.lastIndexOf("."));
+    songFName.trim();
+    String path = "/" + songFName + ".csv";
     File f = SD.open(path);
     if (!f)
         return bm;
