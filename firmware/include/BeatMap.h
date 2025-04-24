@@ -21,7 +21,7 @@ public:
   int getBpm() const;
 
   void setTimeSignature(int num, int den);
-  void getTimeSignature(int &num, int &den) const;
+  int getTimeSignature() const;
 
   void setBpmMap(const vector<pair<int,int>> &map);
   const vector<pair<int,int>>& getBpmMap() const;

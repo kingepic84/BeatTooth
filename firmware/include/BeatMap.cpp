@@ -76,10 +76,9 @@ void BeatMap::setTimeSignature(int num, int den)
     timeSig[0] = num;
     timeSig[1] = den;
 }
-void BeatMap::getTimeSignature(int &num, int &den) const
-{
-    num = timeSig[0];
-    den = timeSig[1];
+
+int BeatMap::getTimeSignature() const{
+    return *timeSig;
 }
 
 void BeatMap::setBpmMap(const vector<pair<int, int>> &map) { bpmMap = map; }
