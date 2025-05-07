@@ -1,12 +1,14 @@
 #include <DFRobot_DF1201S.h>
 #include "DFSerial.h"
+#include "BeatMap.h"
 #include "mbed.h"
+#include <SD.h>
 #include <Arduino_BMI270_BMM150.h>   // built-in BMI270 accelerometer
 
 // DF1201S music module setup:
 DFSerial* DF1201SSerial;
 DFRobot_DF1201S DF1201S;
-
+using namespace std;
 // RGB LED Pins
 const int redPin   = 8, greenPin = 9, bluePin  = 10;
 // Button pins
@@ -14,18 +16,15 @@ const int btnRestart   = 2, btnPlayPause = 3, btnSkip = 4;
 
 // Two demo songs
 const int songCount = 2;
-int BPMs[songCount] = { 79, 65 };
-const int patternLengths[songCount] = { 4 , 4};
-bool clapPatterns[songCount][4] = {
-  { true,  true,  true,  true  },
-  { true,  false, true,  false }
-};
+array<int, 4> clapPatterns;
+
 int currentSong = 0;
 
 // Beat & pattern
 int BPM, patternLength;
 unsigned long beatInterval, CLAP_LISTEN_DURATION, beatStartTime;
 int patternIndex;
+int chipSelect = 5;
 bool clapDetectedInBeat;
 
 // Clap state-machine (g’s & ms)
@@ -59,7 +58,7 @@ const unsigned long LONG_PRESS_THRESHOLD = 500;
 unsigned long restartPressStart, skipPressStart;
 bool restartWasPressed = false, restartLongActive = false;
 bool skipWasPressed    = false, skipLongActive    = false;
-
+BeatMap beatMap;
 // — Helpers —
 
 void triggerLED(int color) {
@@ -93,11 +92,19 @@ void resetBeatTimer() {
 }
 
 void loadSongParams() {
-  BPM                  = BPMs[currentSong];
-  patternLength        = patternLengths[currentSong];
+  Serial.println("Before getbpm");
+  BPM                  = beatMap.getBpm();
+  Serial.println("After getbpm: ");
+  Serial.println(beatMap.getBpm());
+  patternLength        = beatMap.getTimeSignature();
+  Serial.println("After patternlength: ");
+  Serial.println(beatMap.getTimeSignature());
   beatInterval         = 60000UL / BPM;
+  Serial.println("After beatinterval");
   CLAP_LISTEN_DURATION = (unsigned long)(beatInterval * 0.4);
+  Serial.println("After clapduration");
   resetBeatTimer();
+  return;
 }
 
 // — Setup —
@@ -110,6 +117,7 @@ void setup() {
     digitalPinToPinName(D0),
     115200
   );
+  bool sdcard = SD.begin(chipSelect);
   DF1201SSerial->logging = false;
   DF1201S.begin(*DF1201SSerial);
   DF1201S.setVol(currentVol);
@@ -129,8 +137,12 @@ void setup() {
     while (1);
   }
   IMU.readAcceleration(prevAx, prevAy, prevAz);
-
+  Serial.println("Init beatMap");
+  Serial.println("SD CARD: " + sdcard);
+  beatMap = BeatMap::loadFromCSV(DF1201S.getFileName());
+  Serial.println("Init song params");
   loadSongParams();
+  Serial.println("After song params");
   // don't auto-start; wait for play button
   isPlaying = false;
   pauseTimestamp = millis();
@@ -153,6 +165,7 @@ void loop() {
       // long-press → restart current
       DF1201S.pause();
       DF1201S.setPlayTime(0);
+      beatMap = BeatMap::loadFromCSV(DF1201S.getFileName());
       loadSongParams();
       DF1201S.start();
       dfPausedLED = false;
@@ -188,12 +201,14 @@ void loop() {
       currentSong = (currentSong+1)%songCount;
       DF1201S.setPlayTime(0);
       if (currentSong==1) {DF1201S.setPlayTime(1);}
+      beatMap = BeatMap::loadFromCSV(DF1201S.getFileName());
       loadSongParams();
       DF1201S.start();
       dfPausedLED = false;
       updateLED();
       isPlaying = true;
-      Serial.print("⏭ Skipped to "); Serial.println(currentSong);
+      Serial.print("⏭ Skipped to "); 
+      Serial.println(currentSong);
       delay(100);
       return;
     }
@@ -203,7 +218,8 @@ void loop() {
       if (currentVol < 30) {
         currentVol++;
         DF1201S.setVol(currentVol);
-        Serial.print("🔊 Vol up to "); Serial.println(currentVol);
+        Serial.print("🔊 Vol up to "); 
+        Serial.println(currentVol);
       }
     }
     skipWasPressed = false;
@@ -216,7 +232,14 @@ void loop() {
     currentSong = (currentSong+1)%songCount;
     DF1201S.setPlayTime(0);
     DF1201S.pause();
+    beatMap.loadFromCSV(DF1201S.getFileName());
     loadSongParams();
+    clapPatterns = beatMap.nextLine(DF1201S.getCurTime());
+    Serial.println("Next line...");
+    Serial.println(clapPatterns.data()[0]);
+    Serial.println(clapPatterns.data()[1]);
+    Serial.println(clapPatterns.data()[2]);
+    Serial.println(clapPatterns.data()[3]);
     isPlaying = false;
     // ← show purple until resumed
     dfPausedLED = true;
@@ -283,10 +306,17 @@ void loop() {
       break;
   }
   prevAx = ax; prevAy = ay; prevAz = az;
-
   // beat evaluation
   if (now - beatStartTime >= beatInterval) {
-    bool expected = clapPatterns[currentSong][patternIndex];
+    if(patternIndex+1 == patternLength){
+        clapPatterns = beatMap.nextLine(DF1201S.getCurTime());
+        Serial.println("Next line...");
+        Serial.println(clapPatterns.data()[0]);
+        Serial.println(clapPatterns.data()[1]);
+        Serial.println(clapPatterns.data()[2]);
+        Serial.println(clapPatterns.data()[3]);
+    }
+    bool expected = clapPatterns.at(patternIndex);
     if (expected) {
       if (clapDetectedInBeat) {
         triggerLED(1); Serial.println("Good beat");
