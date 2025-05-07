@@ -29,17 +29,24 @@ BeatMap BeatMap::loadFromCSV(const String &songFileName)
     songFName.trim();
     String path = "/" + songFName + ".csv";
     File f = SD.open(path);
-    if (!f)
+    if (!f){
+        Serial.println("Inside not file return!");
         return bm;
-
+    }
     String header = f.readStringUntil('\n');
+    Serial.println(header);
     header.trim();
     auto tokens = splitString(header, ',');
     int idx = 0;
+    for (int i = 0; i < 4; i++){
+        Serial.println(tokens[i]);
+    }
     bm.setBpm(tokens[idx++].toInt());
     int num = tokens[idx++].toInt();
     int den = tokens[idx++].toInt();
     bm.setTimeSignature(num, den);
+    Serial.println(bm.getBpm());
+    Serial.println(bm.getTimeSignature());
     bm.setSongName(tokens[idx++]);
     vector<pair<int, int>> changes;
     while (idx + 1 < (int)tokens.size())
@@ -54,12 +61,12 @@ BeatMap BeatMap::loadFromCSV(const String &songFileName)
         line.trim();
         if (line.length() == 0)
             continue;
-        auto parts = splitString(line, ',');
-        if (parts.size() < 4)
+            auto parts = splitString(line, ',');
+            if (parts.size() < 4)
             continue;
-        array<int, 4> m;
+            array<int, 4> m;
         for (int i = 0; i < 4; ++i)
-            m[i] = parts[i].toInt();
+        m[i] = parts[i].toInt();
         measures.push_back(m);
     }
     f.close();
@@ -67,42 +74,42 @@ BeatMap BeatMap::loadFromCSV(const String &songFileName)
     return bm;
 }
 
-void BeatMap::setSongName(const String &name) { songName = name; }
-String BeatMap::getSongName() const { return songName; }
+void BeatMap::setSongName(const String &name) { this->songName = name; }
+String BeatMap::getSongName() const { return this->songName; }
 
-void BeatMap::setBpm(int b) { bpm = b; }
-int BeatMap::getBpm() const { return bpm; }
+void BeatMap::setBpm(int b) { this->bpm = b; }
+int BeatMap::getBpm() { return this->bpm; }
 
 void BeatMap::setTimeSignature(int num, int den)
 {
-    timeSig[0] = num;
-    timeSig[1] = den;
+    this->timeSig[0] = num;
+    this->timeSig[1] = den;
 }
 
-int BeatMap::getTimeSignature() const{
-    return *timeSig;
+int BeatMap::getTimeSignature() {
+    return this->timeSig[0];
 }
 
-void BeatMap::setBpmMap(const vector<pair<int, int>> &map) { bpmMap = map; }
-const vector<pair<int, int>> &BeatMap::getBpmMap() const { return bpmMap; }
+void BeatMap::setBpmMap(const vector<pair<int, int>> &map) { this->bpmMap = map; }
+const vector<pair<int, int>> &BeatMap::getBpmMap() const { return this->bpmMap; }
 
-void BeatMap::setBeatMap(const vector<array<int, 4>> &map) { beatmap = map; }
-const vector<array<int, 4>> &BeatMap::getBeatMap() const { return beatmap; }
+void BeatMap::setBeatMap(const vector<array<int, 4>> &map) { this->beatmap = map; }
+const vector<array<int, 4>> &BeatMap::getBeatMap() const { return this->beatmap; }
 
-bool BeatMap::isSongOver() const { return currentIndex >= beatmap.size(); }
+bool BeatMap::isSongOver() const { return currentIndex >= this->beatmap.size(); }
 
 array<int, 4> BeatMap::nextLine(int currentTimeSec)
 {
-    for (auto it = bpmMap.begin(); it != bpmMap.end(); ++it)
+    for (auto it = this->bpmMap.begin(); it != this->bpmMap.end(); ++it)
     {
         if (currentTimeSec >= it->first)
         {
             setBpm(it->second);
-            bpmMap.erase(it);
+            this->bpmMap.erase(it);
             break;
         }
     }
     if (isSongOver())
         return {0, 0, 0, 0};
-    return beatmap[currentIndex++];
+    return this->beatmap[currentIndex++];
 }

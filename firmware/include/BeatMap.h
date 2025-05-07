@@ -18,10 +18,10 @@ public:
   String getSongName() const;
 
   void setBpm(int b);
-  int getBpm() const;
+  int getBpm();
 
   void setTimeSignature(int num, int den);
-  int getTimeSignature() const;
+  int getTimeSignature();
 
   void setBpmMap(const vector<pair<int,int>> &map);
   const vector<pair<int,int>>& getBpmMap() const;
