@@ -94,15 +94,9 @@ void resetBeatTimer() {
 void loadSongParams() {
   Serial.println("Before getbpm");
   BPM                  = beatMap.getBpm();
-  Serial.println("After getbpm: ");
-  Serial.println(beatMap.getBpm());
   patternLength        = beatMap.getTimeSignature();
-  Serial.println("After patternlength: ");
-  Serial.println(beatMap.getTimeSignature());
   beatInterval         = 60000UL / BPM;
-  Serial.println("After beatinterval");
   CLAP_LISTEN_DURATION = (unsigned long)(beatInterval * 0.4);
-  Serial.println("After clapduration");
   resetBeatTimer();
   return;
 }
@@ -138,7 +132,6 @@ void setup() {
   }
   IMU.readAcceleration(prevAx, prevAy, prevAz);
   Serial.println("Init beatMap");
-  Serial.println("SD CARD: " + sdcard);
   beatMap = BeatMap::loadFromCSV(DF1201S.getFileName());
   Serial.println("Init song params");
   loadSongParams();
@@ -240,8 +233,7 @@ void loop() {
     Serial.println(clapPatterns.data()[1]);
     Serial.println(clapPatterns.data()[2]);
     Serial.println(clapPatterns.data()[3]);
-    isPlaying = false;
-    // ← show purple until resumed
+    isPlaying = false; // ← show purple until resumed
     dfPausedLED = true;
     digitalWrite(redPin, HIGH);
     digitalWrite(greenPin, LOW);
