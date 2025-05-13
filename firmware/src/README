@@ -88,3 +88,34 @@ Output includes:
 
 * Total hits and misses
 * Histogram of timing offsets
+
+---
+
+# BeatMap.cpp / BeatMap.h
+
+## Overview
+
+The **BeatMap** class abstracts beatmap file I/O and parsing, providing a simple API for Arduino sketches:
+
+```cpp
+class BeatMap {
+public:
+  // Load beatmap metadata and patterns from a CSV on the SD card
+  static BeatMap loadFromCSV(const String &filename);
+
+  int getBpm() const;
+  int getTimeSignature() const;
+  String getSongName() const;
+
+  // Return the next pattern line (array of 0/1) based on the current playback time
+  std::array<int,4> nextLine(unsigned long currentTime) const;
+};
+```
+
+Responsibilities:
+
+* Read song metadata (name, BPM, time signature) from the first line of a CSV file.
+* Read subsequent lines as beat patterns (comma‑separated 0/1 values).
+* Provide song name and pattern data to sketches in real time.
+
+By centralizing file parsing, `BeatMap` ensures sketches remain focused on playback, detection, and BLE logic.
