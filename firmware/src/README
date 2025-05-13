@@ -2,19 +2,26 @@
 
 ## Overview
 
-`MusicClapplay.cpp` is an Arduino sketch that integrates:
+**MusicClapplay.cpp** is an Arduino sketch that integrates:
 
 * **DFRobot DF1201S** music module (DFPlayer) for audio playback
 * **BMI270** accelerometer for clap detection
-* **SD card** with `BeatMap` for dynamic beatmap loading
+* **SD card** with the `BeatMap` class for dynamic beatmap loading
 * **RGB LED feedback** on pins 8 (red), 9 (green), and 10 (blue)
 * **Pushbuttons** on pins 2 (Restart), 3 (Play/Pause), and 4 (Skip)
 
-The sketch loads a beatmap from a CSV on the SD card, plays songs, detects claps relative to the beat pattern, scores the user, and provides visual LED feedback:
+This sketch performs the following:
 
-* **Green LED** on an on‑beat clap
-* **Blue LED** on an off‑beat clap
-* **Red LED** for missed beats
+1. Initializes the DFPlayer and SD card.
+2. Loads beatmap data (BPM, time signature, and beat patterns) from a CSV file via `BeatMap`.
+3. Plays the selected song via the DFPlayer module.
+4. Detects claps using the BMI270 accelerometer, applying thresholds to distinguish on‑beat and off‑beat claps.
+5. Updates and displays a running score.
+6. Provides LED feedback:
+
+   * **Green LED** for an on‑beat clap (good clap).
+   * **Blue LED** for an off‑beat clap (clap detected but off beat).
+   * **Red LED** for missed beats (no clap when expected).
 
 ---
 
@@ -22,15 +29,26 @@ The sketch loads a beatmap from a CSV on the SD card, plays songs, detects claps
 
 ## Overview
 
-`ble_sd_clap.cpp` extends `MusicClapplay.cpp` by adding BLE server functionality using the **ArduinoBLE** library and incorporating beatmap support via the SD library. It streams live song metadata, playback progress, and scoring to a macOS GUI.
+**ble\_sd\_clap.cpp** extends `MusicClapplay.cpp` by adding BLE server functionality with **ArduinoBLE** and robust beatmap support:
 
-Key features:
+* **SD Library** (`<SD.h>`) initialization and error reporting on failure.
+* **BeatMap** integration (`BeatMap.h` / `BeatMap.cpp`) to load song metadata, BPM, time signature, and dynamic beat patterns from CSV.
+* **BLEService** and four **BLECharacteristic** objects for:
 
-* **SD Card Initialization** using `<SD.h>`—prints an error to Serial on failure
-* **BeatMap** loading from CSV files for song metadata, BPM, time signature, and beat patterns
-* **BLEService** and four **BLECharacteristic** objects for song name, score, current time, and total duration
-* BLE **connect/disconnect** event handlers via `BLE.setEventHandler`
-* Pattern buffer implemented using `std::array<int,4>` for fixed-size beat patterns
+  * Song name
+  * Real‑time score updates
+  * Current playback time
+  * Total song duration
+* BLE **connect** and **disconnect** event handlers using `BLE.setEventHandler` to start/stop advertising.
+* **Pattern buffer** using `std::array<int,4>` for fixed‑length beat patterns, refreshed each measure.
+
+Key workflow:
+
+1. Initialize DFPlayer, SD card, and load `BeatMap` from CSV on SD card root.
+2. Set up BLE advertising with custom service and characteristics.
+3. Respond to button presses (restart, skip, play/pause) to control playback and beatmap state.
+4. Detect claps, update score, trigger LED feedback, and write to `scoreChar`.
+5. Notify connected BLE central of playback time and final score.
 
 ---
 
@@ -38,14 +56,14 @@ Key features:
 
 ## Overview
 
-`BLE_clap.ino` is a minimal Arduino sketch demonstrating BLE notifications paired with clap detection and basic LED feedback:
+**BLE\_clap.ino** is a minimal demonstration of BLE notifications tied to clap detection:
 
-* Configures **ArduinoBLE** to advertise a custom service UUID
-* Defines a characteristic for clap events
-* Detects a simple clap via the accelerometer
-* Sends a BLE notification when a clap is detected
+* Configures **ArduinoBLE** to advertise a custom service UUID.
+* Defines a single characteristic for clap event notifications.
+* Detects a simple clap via the accelerometer (BMI270).
+* Sends a BLE notification when a clap is detected.
 
-This file illustrates the bare essentials to get BLE notifications on a clap event but does not include full beatmap, SD card, or scoring logic.
+This file highlights the core BLE setup and notification mechanism without full beatmap, SD card, or scoring logic.
 
 ---
 
@@ -53,11 +71,12 @@ This file illustrates the bare essentials to get BLE notifications on a clap eve
 
 ## Overview
 
-`beat_scan.py` is a Python utility for processing recorded accelerometer logs and analyzing them against expected beat intervals. It can:
+**beat\_scan.py** is a Python utility for analyzing accelerometer logs against expected beat intervals:
 
-* Parse CSV or raw data files containing timestamped accelerometer readings
-* Use provided BPM and time signature to compute expected beat times
-* Compare detected acceleration peaks (claps) to beat times and output timing accuracy statistics
+* Parses CSV or raw data files containing timestamped accelerometer readings.
+* Accepts **BPM** and **time signature** parameters to compute expected beat times.
+* Compares detected acceleration peaks (claps) to beat times.
+* Outputs statistics on hit/miss counts and timing offsets.
 
 ### Usage
 
@@ -65,31 +84,7 @@ This file illustrates the bare essentials to get BLE notifications on a clap eve
 python beat_scan.py --input data.csv --bpm 80 --time-signature 4
 ```
 
-Outputs:
+Output includes:
 
-* Hit/miss counts
-* Timing offsets histogram
-
----
-
-# BeatMap.cpp / BeatMap.h
-
-## Overview
-
-`BeatMap` is a C++ class responsible for:
-
-* Loading song metadata (name, BPM, time signature) from CSV files on the SD card
-* Providing sequential beat patterns to Arduino sketches
-* Serving song name and total duration metadata
-
-The public API includes:
-
-```cpp
-static BeatMap loadFromCSV(const String &filename);
-int getBpm() const;
-int getTimeSignature() const;
-String getSongName() const;
-std::array<int,4> nextLine(unsigned long currentTime) const;
-```
-
-This class abstracts all file I/O and parsing, making beatmap data available for real-time in-sketch usage.
+* Total hits and misses
+* Histogram of timing offsets
