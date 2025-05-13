@@ -1,6 +1,6 @@
-BeatTooth Project
+#BeatTooth Project
 
-Overview
+##Overview
 
 BeatTooth is a rhythm-based interactive project using an Arduino-compatible board, a DFPlayer MP3 module, an IMU sensor (BMI270), an SD card for beatmap storage, and Bluetooth® Low Energy (BLE) communication. It plays demo songs, detects claps on the beat, scores the user, and streams real-time song and score data to a macOS GUI application.
 
@@ -9,7 +9,6 @@ LED Feedback:
 	•	Blue LED lights on an off‑beat clap (clap detected but off beat).
 	•	Red LED lights for a missed beat (no clap when expected).
 
-.
 ├── README.md
 └── firmware
    └── src
