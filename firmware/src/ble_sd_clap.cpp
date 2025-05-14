@@ -51,12 +51,12 @@ unsigned long phaseStart = 0;
 float         prevAx=0, prevAy=0, prevAz=0;
 
 // Thresholds
-const float   RISE_THRESHOLD_G     = 0.7;
-const float   FALL_THRESHOLD_G     = 0.7;
-const float   OUT_THRESHOLD_G      = 0.4;
-const unsigned long MAX_RISE_DURATION = 40;
-const unsigned long MAX_OUT_DURATION  = 120;
-const unsigned long CLAP_MARGIN_MS    = 370;
+float   RISE_THRESHOLD_G     = 0.7;
+float   FALL_THRESHOLD_G     = 0.7;
+float   OUT_THRESHOLD_G      = 0.4;
+unsigned long MAX_RISE_DURATION = 40;
+unsigned long MAX_OUT_DURATION  = 120;
+unsigned long CLAP_MARGIN_MS    = 250;
 
 // LED timing
 const unsigned long LED_ON_DURATION = 150;
@@ -79,6 +79,8 @@ BLECharacteristic songNameChar   ("12345678-1234-1234-1234-1234567890ac", BLERea
 BLECharacteristic scoreChar      ("12345678-1234-1234-1234-1234567890ad", BLERead | BLENotify, 2);
 BLECharacteristic timeChar       ("12345678-1234-1234-1234-1234567890ae", BLERead | BLENotify, 2);
 BLECharacteristic totalTimeChar  ("12345678-1234-1234-1234-1234567890af", BLERead | BLENotify, 2);
+BLECharacteristic forceChar      ("12345678-1234-1234-1234-1234567890b0", BLERead | BLEWrite, 1);
+BLECharacteristic speedChar      ("12345678-1234-1234-1234-1234567890b1", BLERead | BLEWrite, 1);
 
 unsigned long lastTimeNotify = 0;
 unsigned long lastEOSCheck   = 0;
@@ -119,7 +121,7 @@ void loadSongParams() {
   }
 
   beatInterval         = 60000UL / BPM;
-  CLAP_LISTEN_DURATION = (unsigned long)(beatInterval * 0.4);
+  CLAP_LISTEN_DURATION = (unsigned long)(beatInterval * 1);
   beatStartTime        = millis();
   patternIndex         = 0;
   clapDetectedInBeat   = false;
@@ -161,6 +163,60 @@ void announceSongStart() {
 #endif
 
   lastTimeNotify = millis();
+}
+
+// Adjusts your rise/fall/out thresholds
+void onForceWritten(BLEDevice, BLECharacteristic characteristic) {
+    Serial.println("force change");
+    int v;
+    characteristic.readValue(&v, 1);
+    switch (v) {
+      case 0:  // Soft
+        RISE_THRESHOLD_G = 0.5;
+        FALL_THRESHOLD_G = 0.5;
+        OUT_THRESHOLD_G  = 0.2;
+        break;
+      case 1:  // Normal
+        RISE_THRESHOLD_G = 0.7;
+        FALL_THRESHOLD_G = 0.7;
+        OUT_THRESHOLD_G  = 0.4;
+        break;
+      case 2:  // Hard
+        RISE_THRESHOLD_G = 1.0;
+        FALL_THRESHOLD_G = 1.0;
+        OUT_THRESHOLD_G  = 0.6;
+        break;
+    }
+#ifdef DEBUG
+    //Serial.("Force set to %d\n", v);
+#endif
+}
+
+// Adjusts rise/out durations and beat-margin
+void onSpeedWritten(BLEDevice, BLECharacteristic characteristic) {
+    Serial.println("speed change");
+    int v;
+    characteristic.readValue(&v, 1);
+    switch (v) {
+      case 0:  // Slow
+        MAX_RISE_DURATION = 80;
+        MAX_OUT_DURATION  = 200;
+        CLAP_MARGIN_MS    = 400;
+        break;
+      case 1:  // Normal
+        MAX_RISE_DURATION = 40;
+        MAX_OUT_DURATION  = 120;
+        CLAP_MARGIN_MS    = 250;
+        break;
+      case 2:  // Fast
+        MAX_RISE_DURATION = 20;
+        MAX_OUT_DURATION  =  80;
+        CLAP_MARGIN_MS    = 200;
+        break;
+    }
+#ifdef DEBUG
+    //Serial.print("Speed set to %d\n", v);
+#endif
 }
 
 // — Setup —
@@ -224,6 +280,10 @@ void setup() {
   songService.addCharacteristic(scoreChar);
   songService.addCharacteristic(timeChar);
   songService.addCharacteristic(totalTimeChar);
+  songService.addCharacteristic(forceChar);
+  songService.addCharacteristic(speedChar);
+  forceChar.setEventHandler(BLEWritten, onForceWritten);
+  speedChar.setEventHandler(BLEWritten, onSpeedWritten);
   BLE.addService(songService);
   BLE.setEventHandler(BLEConnected,    [](BLEDevice){ BLE.stopAdvertise();  });
   BLE.setEventHandler(BLEDisconnected, [](BLEDevice){ BLE.advertise();      });
@@ -233,7 +293,12 @@ void setup() {
   scoreChar.writeValue((uint8_t*)"\0\0", 2);
   timeChar.writeValue((uint8_t*)"\0\0", 2);
   totalTimeChar.writeValue((uint8_t*)"\0\0", 2);
-  BLE.advertise();
+  forceChar.writeValue((uint8_t*)"\0", 1);
+  speedChar.writeValue((uint8_t*)"\0", 1);
+  if(!BLE.advertise()){
+    Serial.println("ERROR: BLE fail");
+    while(1);
+  };
 
 #ifdef DEBUG
   Serial.println("BLE advertising as beatTooth");
@@ -314,7 +379,7 @@ void loop() {
       beatStartTime += (now - pauseTimestamp);
       if (!songPlaying) announceSongStart();
     }
-    delay(200);
+    delay(50);
   }
   if (!isPlaying) {
     pauseTimestamp = now;
