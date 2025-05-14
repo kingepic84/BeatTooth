@@ -4,7 +4,8 @@ import asyncio
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QHBoxLayout, QVBoxLayout, QLabel, QProgressBar,
-    QLineEdit, QPushButton, QListWidget, QMessageBox
+    QLineEdit, QPushButton, QListWidget, QMessageBox,
+    QDialog, QSlider
 )
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from bleak import BleakScanner, BleakClient
@@ -15,6 +16,8 @@ SONG_NAME_UUID    = "12345678-1234-1234-1234-1234567890ac"
 SCORE_CHAR_UUID   = "12345678-1234-1234-1234-1234567890ad"
 TIME_CHAR_UUID    = "12345678-1234-1234-1234-1234567890ae"
 TOTAL_TIME_UUID   = "12345678-1234-1234-1234-1234567890af"
+FORCE_CHAR_UUID   = "12345678-1234-1234-1234-1234567890b0"
+SPEED_CHAR_UUID   = "12345678-1234-1234-1234-1234567890b1"
 DB_PATH           = "leaderboard.db"
 
 # Initialize SQLite DB & table
@@ -27,8 +30,7 @@ CREATE TABLE IF NOT EXISTS scores (
     score INTEGER NOT NULL,
     ts    DATETIME DEFAULT CURRENT_TIMESTAMP
 )
-"""
-)
+""")
 conn.commit()
 
 class BLEWorker(QThread):
@@ -41,9 +43,14 @@ class BLEWorker(QThread):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = True
+        self.client = None
 
     def run(self):
-        asyncio.run(self._ble_loop())
+        # create a fresh loop for this thread
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        # now run your main loop on it
+        self.loop.run_until_complete(self._ble_loop())
 
     async def _ble_loop(self):
         prev_state = False
@@ -64,6 +71,7 @@ class BLEWorker(QThread):
             try:
                 client = BleakClient(target.address)
                 await client.connect()
+                self.client = client
                 if client.is_connected:
                     if not prev_state:
                         self.connection_changed.emit(True)
@@ -83,11 +91,11 @@ class BLEWorker(QThread):
             await asyncio.sleep(1)
 
     def _on_song_name(self, sender, data):
-        self.song_name_updated.emit(bytes(data).decode('utf-8'))
+        text = bytes(data).decode('utf-8').rstrip('\x00')
+        self.song_name_updated.emit(text)
 
     def _on_score(self, sender, data):
         score = int.from_bytes(data, 'little')
-        print(f"Received score: {score}")
         self.score_updated.emit(score)
 
     def _on_time(self, sender, data):
@@ -124,6 +132,12 @@ class MainWindow(QMainWindow):
             "background-color: red; border-radius: 8px;"
         )
         left_layout.addWidget(self.conn_indicator, alignment=Qt.AlignLeft)
+
+        # Settings button
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.setStyleSheet("font-size: 14pt;")
+        self.settings_button.clicked.connect(self.open_settings)
+        left_layout.addWidget(self.settings_button, alignment=Qt.AlignLeft)
 
         # Now Playing label
         self.title_song = QLabel("Now Playing:")
@@ -191,6 +205,8 @@ class MainWindow(QMainWindow):
         self.current_score = 0
         self.update_leaderboard()
 
+    # — Slots for BLEWorker signals —
+
     def on_connection_changed(self, connected):
         color = "green" if connected else "red"
         self.conn_indicator.setStyleSheet(
@@ -217,6 +233,78 @@ class MainWindow(QMainWindow):
 
     def on_total_time(self, tot):
         self.progress.setRange(0, tot)
+
+    # — Settings dialog —
+
+    def open_settings(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Settings")
+        layout = QVBoxLayout(dialog)
+
+        layout.addWidget(QLabel("Force"))
+        self.force_slider = QSlider(Qt.Horizontal)
+        self.force_slider.setRange(0, 2)
+        self.force_slider.setValue(1)
+        self.force_slider.setTickPosition(QSlider.TicksBelow)
+        self.force_slider.setTickInterval(1)
+        self.force_slider.valueChanged.connect(self.update_force_label)
+        layout.addWidget(self.force_slider)
+        self.force_value_label = QLabel("Normal")
+        layout.addWidget(self.force_value_label)
+
+        layout.addWidget(QLabel("Speed"))
+        self.speed_slider = QSlider(Qt.Horizontal)
+        self.speed_slider.setRange(0, 2)
+        self.speed_slider.setValue(1)
+        self.speed_slider.setTickPosition(QSlider.TicksBelow)
+        self.speed_slider.setTickInterval(1)
+        self.speed_slider.valueChanged.connect(self.update_speed_label)
+        layout.addWidget(self.speed_slider)
+        self.speed_value_label = QLabel("Normal")
+        layout.addWidget(self.speed_value_label)
+
+        save_btn = QPushButton("Save")
+        save_btn.clicked.connect(lambda: self.save_settings(dialog))
+        layout.addWidget(save_btn)
+
+        dialog.exec_()
+
+    def update_force_label(self, v):
+        self.force_value_label.setText({0: "Soft", 1: "Normal", 2: "Hard"}[v])
+
+    def update_speed_label(self, v):
+        self.speed_value_label.setText({0: "Slow", 1: "Normal", 2: "Fast"}[v])
+
+    # — Write settings to the already-open BLE connection —
+
+    def save_settings(self, dialog):
+        force = self.force_slider.value()
+        speed = self.speed_slider.value()
+        dialog.accept()
+
+        client = self.worker.client
+        if not client:
+            QMessageBox.warning(self, "Error", "Still scanning for device…")
+            return
+
+        # schedule the MainWindow's coroutine on the BLEWorker's loop
+        future = asyncio.run_coroutine_threadsafe(
+            self._write_settings(client, force, speed),
+            self.worker.loop
+        )
+
+        try:
+            # wait up to 5 seconds
+            result = future.result(timeout=5)
+            QMessageBox.information(self, "Settings", "Settings saved")
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to write: {e}")
+
+    async def _write_settings(self, client: BleakClient, force: int, speed: int):
+        await client.write_gatt_char(FORCE_CHAR_UUID, bytearray([force]))
+        await client.write_gatt_char(SPEED_CHAR_UUID, bytearray([speed]))
+
+    # — Score saving & leaderboard —
 
     def save_score(self):
         name = self.name_entry.text().strip()
