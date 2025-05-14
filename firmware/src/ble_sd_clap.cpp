@@ -56,7 +56,7 @@ float   FALL_THRESHOLD_G     = 0.7;
 float   OUT_THRESHOLD_G      = 0.4;
 unsigned long MAX_RISE_DURATION = 40;
 unsigned long MAX_OUT_DURATION  = 120;
-unsigned long CLAP_MARGIN_MS    = 250;
+unsigned long CLAP_MARGIN_MS    = 500;
 
 // LED timing
 const unsigned long LED_ON_DURATION = 150;
@@ -64,7 +64,7 @@ int                  currentLED     = -1;
 unsigned long        ledOffTime     = 0;
 
 // Volume + long-press detection
-int            currentVol           = 5;
+int            currentVol           = 10;
 const unsigned long LONG_PRESS_THRESHOLD = 500;
 bool           restartWasPressed    = false;
 bool           restartLongActive    = false;
@@ -201,17 +201,17 @@ void onSpeedWritten(BLEDevice, BLECharacteristic characteristic) {
       case 0:  // Slow
         MAX_RISE_DURATION = 80;
         MAX_OUT_DURATION  = 200;
-        CLAP_MARGIN_MS    = 400;
+        CLAP_MARGIN_MS    = 600;
         break;
       case 1:  // Normal
         MAX_RISE_DURATION = 40;
         MAX_OUT_DURATION  = 120;
-        CLAP_MARGIN_MS    = 250;
+        CLAP_MARGIN_MS    = 500;
         break;
       case 2:  // Fast
         MAX_RISE_DURATION = 20;
         MAX_OUT_DURATION  =  80;
-        CLAP_MARGIN_MS    = 200;
+        CLAP_MARGIN_MS    = 400;
         break;
     }
 #ifdef DEBUG
@@ -358,7 +358,7 @@ void loop() {
       return;
     }
   } else {
-    if (skipWasPressed && !skipLongActive && currentVol<30) {
+    if (skipWasPressed && !skipLongActive && currentVol<21) {
       currentVol++;
       DF1201S.setVol(currentVol);
     }
@@ -478,8 +478,8 @@ void loop() {
       // prepare for next track
       beatMap = BeatMap::loadFromCSV(DF1201S.getFileName());
       loadSongParams();
-      DF1201S.pause();
       DF1201S.setPlayTime(0);
+      DF1201S.pause();
       isPlaying    = false;
       digitalWrite(redPin, HIGH);
       digitalWrite(greenPin, LOW);
