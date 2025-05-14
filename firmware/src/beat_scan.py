@@ -25,7 +25,7 @@ conn = sqlite3.connect(DB_PATH)
 c = conn.cursor()
 c.execute("""
 CREATE TABLE IF NOT EXISTS scores (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,x 
     name  TEXT    NOT NULL,
     score INTEGER NOT NULL,
     ts    DATETIME DEFAULT CURRENT_TIMESTAMP
